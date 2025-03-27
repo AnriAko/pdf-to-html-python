@@ -166,7 +166,7 @@ def generate_json(pdf_path, images_data, text_data, metadata, page_count):
         page_images = [img for img in images_data if img['page'] == page_number]
         
         page_info = {
-            "page_number": page_number + 1,  # Номер страницы (с 1, а не с 0)
+            "page_number": page_number + 1,
             "size": {
                 "width": page_data['width'],
                 "height": page_data['height']
@@ -237,7 +237,7 @@ def process_pdf_parallel(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
         page_count = len(pdf.pages)
 
-    # Используем Pool для параллельной обработки страниц
+    # Using Pool for parallel processing pages
     with mp.Pool(mp.cpu_count()) as pool:
         results = pool.starmap(process_page, [(page_number, pdf_path) for page_number in range(page_count)])
 
@@ -246,16 +246,15 @@ def process_pdf_parallel(pdf_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python pdf_to_json.py <pdf_file>")
+        print("Usage: python pdf_to_json_multi_proc.py <pdf_file>")
         sys.exit(1)
 
     start_time = time.time()
     pdf_path = sys.argv[1]
 
-    # Параллельная обработка
+    # Parallel process
     text_data = process_pdf_parallel(pdf_path)
 
-    # Метаданные и другие части
     images_data = []
     for page_data in text_data:
         images_data.extend(page_data['images'])

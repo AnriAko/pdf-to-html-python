@@ -22,7 +22,7 @@ def generate_json(pdf_path, full_text):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python pdf_to_json.py <pdf_file>")
+        print("Usage: python pdf_pure_text_to_json.py <pdf_file>")
         sys.exit(1)
 
     start_time = time.time()

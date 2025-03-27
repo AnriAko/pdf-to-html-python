@@ -51,7 +51,7 @@ def process_pdf(pdf_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python pdf_to_json.py <pdf_file>")
+        print("Usage: python pdf_text_without_format_to_json.py <pdf_file>")
         sys.exit(1)
 
     start_time = time.time()
