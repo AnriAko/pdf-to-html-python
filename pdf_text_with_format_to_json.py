@@ -1,57 +1,9 @@
-import fitz  # PyMuPDF
-from PIL import Image
-from io import BytesIO
-import base64
 import pdfplumber
+import re
 import sys
 import time
-import re
-
-# Function to extract an image from PDF and convert it to Base64 format
-def get_image_base64(pdf_path, page_number, img_index):
-    """
-    Retrieves an image from the PDF on the specified page and converts it to Base64 format.
-    """
-    doc = fitz.open(pdf_path)
-
-    # Extract images from each page
-    img_list = doc.get_page_images(page_number)
-    img = img_list[img_index]
-    base = fitz.Pixmap(doc, img[0])
-
-    if img[1]:  # If there is a mask
-        mask = fitz.Pixmap(doc, img[1])
-        pix = fitz.Pixmap(base, mask)
-    else:
-        pix = base
-
-    # Convert Pixmap to image
-    image_data = BytesIO(pix.tobytes("png"))
-    img_pil = Image.open(image_data)
-
-    # Convert image to Base64
-    buffered = BytesIO()
-    img_pil.save(buffered, format="PNG")
-    img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
-    return img_base64
-
-# Function to get the coordinates of an image
-def get_image_coordinates(pdf_path, page_number, img_index):
-    """
-    Retrieves the coordinates of an image on the specified page.
-    """
-    with pdfplumber.open(pdf_path) as pdf:
-        page = pdf.pages[page_number]
-        images = page.images
-        img = images[img_index]
-        
-        # Image coordinates
-        pdf_x0, pdf_y0, pdf_x1, pdf_y1 = img["x0"], img["top"], img["x1"], img["bottom"]
-        img_width = abs(pdf_x1 - pdf_x0)
-        img_height = abs(pdf_y1 - pdf_y0)
-
-        return round(pdf_x0, 2), round(pdf_y0, 2), round(img_width, 2), round(img_height, 2)
+import json
+import fitz  # PyMuPDF
 
 def clean_font_name(font_name):
     font_name = font_name.split('+')[-1]
@@ -141,104 +93,72 @@ def extract_text_from_page(page):
     
     return words_data
 
-# Function to get the page dimensions of the PDF
+def get_pdf_metadata(pdf_path):
+    doc = fitz.open(pdf_path)
+    metadata = doc.metadata
+    return metadata
+
 def get_page_dimensions(pdf_path):
     with pdfplumber.open(pdf_path) as pdf:
-        page = pdf.pages[0]  # Get the dimensions of the first page (if all pages are the same)
+        page = pdf.pages[0]
         return round(page.width, 2), round(page.height, 2)
 
-def generate_html(pdf_path, images_data, text_data):
-    # Get page dimensions
-    page_width, page_height = get_page_dimensions(pdf_path)
-    
-    # HTML template
-    html_template = """<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            .page {{ position: relative; width: {page_width}px; height: {page_height}px; border: 1px solid #ddd; margin-bottom: 20px; }}
-            img {{ position: absolute; }}
-            span {{ position: absolute; white-space: pre; }}
-        </style>
-    </head>
-    <body>
-    {content}
-    </body>
-    </html>"""
-
-    html_content = ""
+def generate_json(pdf_path, text_data, metadata, page_count):
+    pages_data = []
     for page_data in text_data:
-        page_number = page_data['page']
-        page_html = f'<div class="page" style="width:{page_width}px; height:{page_height}px;">\n'
+        page_info = {
+            "size": {
+                "width": page_data['width'],
+                "height": page_data['height']
+            },
+            "text": page_data['text']
+        }
 
-        # Add images for this page
-        for img_data in [img for img in images_data if img['page'] == page_number]:
-            img_base64 = img_data['base64']
-            pdf_x0, pdf_y0, img_width, img_height = img_data['coordinates'].values()
-            page_html += f'<img src="data:image/png;base64,{img_base64}" style="width:{img_width}px; height:{img_height}px; left:{pdf_x0}px; top:{pdf_y0}px;" />\n'
+        pages_data.append(page_info)
 
-        # Add text for this page
-        for word_data in page_data['text']:
-            page_html += (
-                f'<span style="font-size:{word_data["font_size"]}px; font-family:{word_data["font_name"]}; '
-                f'font-weight:{word_data["font_weight"]}; font-style:{word_data["font_style"]}; color:{word_data["color"]}; '
-                f'left:{word_data["x"]}px; top:{word_data["y"]}px;">{word_data["word"]}</span>\n'
-            )
+    result = {
+        "pdf_name": pdf_path.split("/")[-1],
+        "metadata": metadata,  # Add the metadata here
+        "overall_page_count": page_count,  # Add overall page count
+        "pages": pages_data
+    }
+    
+    return result
 
-        page_html += "</div>\n"
-        html_content += page_html
-
-    return html_template.format(page_width=page_width, page_height=page_height, content=html_content)
-
-# Main function to process the PDF and generate data
 def process_pdf(pdf_path):
-    images_data = []
     text_data = []
 
-    # Process images and text
     with pdfplumber.open(pdf_path) as pdf:
         for page_number, page in enumerate(pdf.pages):
             page_html = extract_text_from_page(page)
-
-            images_on_page = page.images
-            for img_index, img in enumerate(images_on_page):
-                img_base64 = get_image_base64(pdf_path, page_number, img_index)
-                pdf_x0, pdf_y0, img_width, img_height = get_image_coordinates(pdf_path, page_number, img_index)
-                images_data.append({
-                    "page": page_number,
-                    "base64": img_base64,
-                    "coordinates": {
-                        "x0": pdf_x0,
-                        "y0": pdf_y0,
-                        "width": img_width,
-                        "height": img_height
-                    }
-                })
+            page_width, page_height = get_page_dimensions(pdf_path)
 
             text_data.append({
                 "page": page_number,
+                "width": page_width,
+                "height": page_height,
                 "text": page_html
             })
 
-    return images_data, text_data
+    metadata = get_pdf_metadata(pdf_path)
+    page_count = len(pdf.pages)
+    return text_data, metadata, page_count
 
-# Entry point
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python pdf_to_html.py <pdf_file>")
+        print("Usage: python pdf_to_json.py <pdf_file>")
         sys.exit(1)
 
     start_time = time.time()
     pdf_path = sys.argv[1]
 
-    images_data, text_data = process_pdf(pdf_path)
-    html_content = generate_html(pdf_path, images_data, text_data)
+    text_data, metadata, page_count = process_pdf(pdf_path)
+    json_data = generate_json(pdf_path, text_data, metadata, page_count)
 
-    with open("output.html", "w", encoding="utf-8") as f:
-        f.write(html_content)
+    with open("output.json", "w", encoding="utf-8") as f:
+        f.write(json.dumps(json_data, indent=4))
 
     end_time = time.time()
     execution_time = end_time - start_time
-    print(f"✅ Done processing! File saved as output.html")
+    print(f"✅ Done processing! File saved as output.json")
     print(f"Execution time: {execution_time} seconds")
