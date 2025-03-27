@@ -5,8 +5,9 @@ import base64
 import pdfplumber
 import sys
 import time
+import re
 
-
+# Функция для извлечения изображения из PDF в формате Base64
 def get_image_base64(pdf_path, page_number, img_index):
     """
     Retrieves an image from the PDF on the specified page and converts it to Base64 format.
@@ -35,6 +36,7 @@ def get_image_base64(pdf_path, page_number, img_index):
     
     return img_base64
 
+# Функция для получения координат изображения
 def get_image_coordinates(pdf_path, page_number, img_index):
     """
     Retrieves the coordinates of an image on the specified page.
@@ -49,72 +51,124 @@ def get_image_coordinates(pdf_path, page_number, img_index):
         img_width = abs(pdf_x1 - pdf_x0)
         img_height = abs(pdf_y1 - pdf_y0)
 
-        return pdf_x0, pdf_y0, img_width, img_height
+        return round(pdf_x0, 2), round(pdf_y0, 2), round(img_width, 2), round(img_height, 2)
+
+
+def append_word(words_data, word, font_size, font_name, font_weight, font_style, color_str, x, y, is_superscript=False, is_subscript=False):
+    words_data.append({
+        "word": word,
+        "font_size": round(font_size, 2),
+        "font_name": font_name,
+        "font_weight": font_weight,
+        "font_style": font_style,
+        "color": color_str,
+        "x": round(x, 2),
+        "y": round(y, 2),
+        "is_superscript": is_superscript,
+        "is_subscript": is_subscript
+    })
+
+
+def clean_font_name(font_name):
+    font_name = font_name.split('+')[-1]
+    font_name = re.sub(r'MT$', '', font_name)
+    font_name = re.sub(r'(-?(Bold|Italic|Oblique|Light|Regular|SemiBold|Medium|Black|ExtraBold|Condensed|Extended|Thin))+$', '', font_name)
+    font_name = re.sub(r'-$', '', font_name)
+    return font_name.strip()
+
+def append_word(words_data, word, font_size, font_name, font_weight, font_style, color_str, x, y, is_superscript=False, is_subscript=False):
+    words_data.append({
+        "word": word,
+        "font_size": round(font_size, 2),
+        "font_name": font_name,
+        "font_weight": font_weight,
+        "font_style": font_style,
+        "color": color_str,
+        "x": round(x, 2),
+        "y": round(y, 2),
+        "is_superscript": is_superscript,
+        "is_subscript": is_subscript
+    })
 
 def extract_text_from_page(page):
-    """
-    Extracts text with coordinates and fonts from the specified page.
-    """
-    html_content = ""
-    word = ""  # Store the current word
-    last_char = None  # Store the last character
-    char_list = page.chars  # List of characters on the page
+    words_data = []
+    word = ""
+    first_char = None
+    char_list = page.chars
+    prev_font_size = prev_font_name = prev_font_weight = prev_font_style = None
 
-    for i, char in enumerate(char_list):  # Iterate through each character
+    for i, char in enumerate(char_list):
         text = char["text"]
         font_size = char["size"]
         font_name = char["fontname"]
         left = char["x0"]
         top = char["top"]
+        color = char.get("non_stroking_color", (0, 0, 0))
 
-        # Check if the font is bold
-        is_bold = "Bold" in font_name  # Check if "Bold" is part of the font name
-        font_weight = "bold" if is_bold else "normal"
+        color_str = f"rgb({color[0] * 255}, {color[1] * 255}, {color[2] * 255})" if len(color) == 3 else f"rgb({color[0] * 255}, {color[0] * 255}, {color[0] * 255})"
+        
+        normalized_font_name = clean_font_name(font_name)
+        font_weight = "bold" if "Bold" in font_name else "normal"
+        font_style = "italic" if "Italic" in font_name or "Oblique" in font_name else "normal"
 
-        if not word:
+        if not word or (prev_font_size != font_size or prev_font_name != normalized_font_name or prev_font_weight != font_weight or prev_font_style != font_style):
+            if word:
+                append_word(words_data, word, prev_font_size, prev_font_name, prev_font_weight, prev_font_style, color_str, first_char["x0"], first_char["top"])
+            word = ""
             first_char = char
 
-        if text.isalnum():
-            word += text
-            last_char = char
-        elif text in [' ', '.', ',', ';', ':', '!', '?', '-', '(', ')', '\n']:
+        is_superscript = False
+        is_subscript = False
+        if i > 0:
+            prev_char = char_list[i - 1]
+            if (top < prev_char["top"] - 2) and (font_size < prev_char["size"] * 0.9):
+                is_superscript = True
+            if (top > prev_char["top"] + 2) and (font_size < prev_char["size"] * 0.9):
+                is_subscript = True
+
+        if is_superscript or is_subscript:
             if word:
-                html_content += (
-                    f'<span style="font-size:{font_size}px; font-family:{last_char["fontname"]}; '
-                    f'font-weight:{font_weight}; left:{first_char["x0"]}px; top:{first_char["top"]}px;">{word}</span>\n'
-                )
+                append_word(words_data, word, prev_font_size, prev_font_name, prev_font_weight, prev_font_style, color_str, first_char["x0"], first_char["top"])
                 word = ""
-            html_content += (
-                f'<span style="font-size:{font_size}px; font-family:{font_name}; font-weight:{font_weight}; '
-                f'left:{left}px; top:{top}px;">{text}</span>\n'
-            )
+            append_word(words_data, text, font_size, normalized_font_name, font_weight, font_style, color_str, left, top, is_superscript, is_subscript)
+        elif text.isalnum():
+            word += text
+        else:
+            if word:
+                append_word(words_data, word, prev_font_size, prev_font_name, prev_font_weight, prev_font_style, color_str, first_char["x0"], first_char["top"])
+                word = ""
+            append_word(words_data, text, font_size, normalized_font_name, font_weight, font_style, color_str, left, top)
+
+        prev_font_size = font_size
+        prev_font_name = normalized_font_name
+        prev_font_weight = font_weight
+        prev_font_style = font_style
 
         if i + 1 < len(char_list):
             next_char = char_list[i + 1]
-            next_top = next_char["top"]
-
-            if abs(next_top - top) > 5:
+            if abs(next_char["top"] - top) > font_size * 0.5:
                 if word:
-                    html_content += (
-                        f'<span style="font-size:{font_size}px; font-family:{last_char["fontname"]}; '
-                        f'font-weight:{font_weight}; left:{first_char["x0"]}px; top:{first_char["top"]}px;">{word}</span>\n'
-                    )
+                    append_word(words_data, word, prev_font_size, prev_font_name, prev_font_weight, prev_font_style, color_str, first_char["x0"], first_char["top"])
                     word = ""
                 first_char = next_char
 
     if word:
-        html_content += (
-            f'<span style="font-size:{font_size}px; font-family:{last_char["fontname"]}; '
-            f'font-weight:{font_weight}; left:{first_char["x0"]}px; top:{first_char["top"]}px;">{word}</span>\n'
-        )
-
-    return html_content
+        append_word(words_data, word, prev_font_size, prev_font_name, prev_font_weight, prev_font_style, color_str, first_char["x0"], first_char["top"])
+    
+    return words_data
 
 
-def generate_html(pdf_path):
-    """
-    Generates an HTML document that includes images and their coordinates, as well as text from the PDF.
-    """
+# Функция для получения размеров страниц PDF
+def get_page_dimensions(pdf_path):
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[0]  # Получаем размеры первой страницы (если все страницы одинаковые)
+        return round(page.width, 2), round(page.height, 2)
+
+def generate_html(pdf_path, images_data, text_data):
+    # Получаем размеры страницы
+    page_width, page_height = get_page_dimensions(pdf_path)
+    
+    # HTML шаблон
     html_template = """<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -131,77 +185,77 @@ def generate_html(pdf_path):
     </html>"""
 
     html_content = ""
-    fonts = set()  # Store unique fonts
+    for page_data in text_data:
+        page_number = page_data['page']
+        page_html = f'<div class="page" style="width:{page_width}px; height:{page_height}px;">\n'
 
+        # Добавление изображений для этой страницы
+        for img_data in [img for img in images_data if img['page'] == page_number]:
+            img_base64 = img_data['base64']
+            pdf_x0, pdf_y0, img_width, img_height = img_data['coordinates'].values()
+            page_html += f'<img src="data:image/png;base64,{img_base64}" style="width:{img_width}px; height:{img_height}px; left:{pdf_x0}px; top:{pdf_y0}px;" />\n'
+
+        # Добавление текста для этой страницы
+        for word_data in page_data['text']:
+            page_html += (
+                f'<span style="font-size:{word_data["font_size"]}px; font-family:{word_data["font_name"]}; '
+                f'font-weight:{word_data["font_weight"]}; font-style:{word_data["font_style"]}; color:{word_data["color"]}; '
+                f'left:{word_data["x"]}px; top:{word_data["y"]}px;">{word_data["word"]}</span>\n'
+            )
+
+        page_html += "</div>\n"
+        html_content += page_html
+
+    return html_template.format(page_width=page_width, page_height=page_height, content=html_content)
+
+# Основная функция для обработки PDF и генерации данных
+def process_pdf(pdf_path):
+    images_data = []
+    text_data = []
+
+    # Обработка изображений и текста
     with pdfplumber.open(pdf_path) as pdf:
-        doc = fitz.open(pdf_path)
-
         for page_number, page in enumerate(pdf.pages):
-            width, height = page.width, page.height
-            page_html = f'<div class="page" style="width:{width}px; height:{height}px;">\n'
-            
-            # Extract images
-            images = page.images  # Get images on the page
+            page_html = extract_text_from_page(page)
 
-            for img_index, img in enumerate(images):
-                try:
-                    # Get image in Base64 format
-                    img_base64 = get_image_base64(pdf_path, page_number, img_index)
+            images_on_page = page.images
+            for img_index, img in enumerate(images_on_page):
+                img_base64 = get_image_base64(pdf_path, page_number, img_index)
+                pdf_x0, pdf_y0, img_width, img_height = get_image_coordinates(pdf_path, page_number, img_index)
+                images_data.append({
+                    "page": page_number,
+                    "base64": img_base64,
+                    "coordinates": {
+                        "x0": pdf_x0,
+                        "y0": pdf_y0,
+                        "width": img_width,
+                        "height": img_height
+                    }
+                })
 
-                    # Get image coordinates
-                    pdf_x0, pdf_y0, img_width, img_height = get_image_coordinates(pdf_path, page_number, img_index)
+            text_data.append({
+                "page": page_number,
+                "text": page_html
+            })
 
-                    # Add image to HTML
-                    page_html += f'<img src="data:image/png;base64,{img_base64}" style="width:{img_width}px; height:{img_height}px; left:{pdf_x0}px; top:{pdf_y0}px;" />\n'
+    return images_data, text_data
 
-                except Exception as e:
-                    print(f"⚠️ Error processing image {img_index + 1} on page {page_number + 1}: {e}")
-
-            # Extract text
-            page_text = extract_text_from_page(page)  # Extract text separately
-            page_html += f'<div>{page_text}</div>\n'
-
-            page_html += "</div>\n"
-            html_content += page_html
-
-    # Inserting CSS style for fonts
-    css_content = """<style>
-    body {
-        font-family: 'Arial', sans-serif;
-    }
-    """
-
-    for font in fonts:
-        css_content += f"@font-face {{\n"
-        css_content += f"    font-family: '{font}';\n"
-        css_content += f"    src: local('{font}');\n"
-        css_content += f"}}\n"
-
-    css_content += "</style>"
-    
-    # Inserting CSS into HTML
-    html_content = html_template.format(page_width=width, page_height=height, content=html_content)
-    html_content = html_content.replace("<head>", "<head>" + css_content)
-
-    # Saving HTML file
-    with open("output.html", "w", encoding="utf-8") as f:
-        f.write(html_content)
-
-    print("✅ Done processing! File saved as output.html")
-
-
+# Основная точка входа
 if __name__ == "__main__":
-    import sys
-    
     if len(sys.argv) < 2:
         print("Usage: python pdf_to_html.py <pdf_file>")
         sys.exit(1)
 
     start_time = time.time()
-
     pdf_path = sys.argv[1]
-    generate_html(pdf_path)
+
+    images_data, text_data = process_pdf(pdf_path)
+    html_content = generate_html(pdf_path, images_data, text_data)
+
+    with open("output.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
 
     end_time = time.time()
     execution_time = end_time - start_time
+    print(f"✅ Done processing! File saved as output.html")
     print(f"Execution time: {execution_time} seconds")
