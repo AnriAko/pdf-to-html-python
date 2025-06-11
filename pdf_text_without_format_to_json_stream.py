@@ -17,17 +17,17 @@ def extract_text_from_stream(pdf_bytes, pdf_name="stdin.pdf"):
         "p": pages
     }
 
-def save_to_mongodb(data, user_id, mongo_uri, db_name="pdf_db", collection_name="pdf_texts"):
+def save_to_mongodb(data, user_id, mongo_uri, db_name="ol_pdf_to_json", collection_name="pdf_to_json_books"):
     client = MongoClient(mongo_uri)
     try:
         db = client[db_name]
         collection = db[collection_name]
         data["userId"] = user_id
         result = collection.insert_one(data)
-        print(f"✅ Data saved to MongoDB with _id: {result.inserted_id}")
+        print(f"Data saved to MongoDB with _id: {result.inserted_id}")
     finally:
         client.close()
-        print("🔌 MongoDB connection closed")
+        print("MongoDB connection closed")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
@@ -42,4 +42,4 @@ if __name__ == "__main__":
     start = time.time()
     data = extract_text_from_stream(pdf_bytes)
     save_to_mongodb(data, user_id, mongo_uri)
-    print(f"✅ Done in {round(time.time() - start, 2)} seconds")
+    print(f"Done in {round(time.time() - start, 2)} seconds")

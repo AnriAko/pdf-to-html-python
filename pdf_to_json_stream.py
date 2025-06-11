@@ -138,13 +138,13 @@ def generate_json(images_data, text_data, metadata, page_count, user_id, pdf_nam
         "uid": user_id
     }
 
-def save_to_mongodb(data, mongo_uri, db_name="pdf_db", collection_name="pdf_texts"):
+def save_to_mongodb(data, user_id, mongo_uri, db_name="ol_pdf_to_json", collection_name="pdf_to_json_books"):
     client = MongoClient(mongo_uri)
     try:
         db = client[db_name]
         collection = db[collection_name]
         result = collection.insert_one(data)
-        print(f"✅ Saved to MongoDB with _id: {result.inserted_id}")
+        print(f"Saved to MongoDB with _id: {result.inserted_id}")
     finally:
         client.close()
 
@@ -191,9 +191,9 @@ if __name__ == "__main__":
     images_data, text_data, metadata, page_count = process_pdf_from_stream(pdf_bytes)
     json_data = generate_json(images_data, text_data, metadata, page_count, user_id, "stdin.pdf")
 
-    save_to_mongodb(json_data, mongo_uri)
+    save_to_mongodb(json_data, user_id, mongo_uri)
 
-    print(f"✅ Done in {round(time.time() - start, 2)} seconds")
+    print(f"Done in {round(time.time() - start, 2)} seconds")
 
 
 # Short Name     Full Name        Description
