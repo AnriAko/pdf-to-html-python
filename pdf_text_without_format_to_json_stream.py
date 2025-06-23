@@ -1,18 +1,25 @@
 import pdfplumber
+import fitz  # PyMuPDF
 import sys
 from pymongo import MongoClient
 from io import BytesIO
 import time
 
-def extract_text_from_stream(pdf_bytes, pdf_name="stdin.pdf"):
+def extract_text_from_stream(pdf_bytes):
     pages = []
     pdf_buffer = BytesIO(pdf_bytes)
+    
     with pdfplumber.open(pdf_buffer) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             pages.append({"t": text})
+
+    pdf_buffer.seek(0)
+    doc = fitz.open(stream=pdf_buffer, filetype="pdf")
+    pdf_title = doc.metadata.get("title") or "Untitled.pdf"
+
     return {
-        "b": pdf_name,
+        "b": pdf_title,
         "p_count": len(pages),
         "p": pages
     }
